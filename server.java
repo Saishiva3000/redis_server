@@ -57,6 +57,7 @@ public class server {
                         try {
                             readProcess(key, client);
                             selector.wakeup();
+                            System.err.println("now it's write time");
                         } catch (IOException e) {
                             e.printStackTrace();
                         }
@@ -79,15 +80,13 @@ public class server {
     public void readProcess(SelectionKey key , SocketChannel client) throws IOException{
         Connection connection = (Connection)key.attachment();
         ByteBuffer buffer = connection.getByteByffer();
-        Queue<ByteBuffer> penBuf = connection.getPendingBuffers();
-        while(true){
-
+        if(connection.getState().equals(Connection.State.READ_LENGTH)){
             int lenRead = client.read(buffer);
-
             if(lenRead == -1){
                 key.interestOps(
                     (key.interestOps() | SelectionKey.OP_WRITE) & ~SelectionKey.OP_READ
                 );
+                return;
             }
 
             if(lenRead == 0){
@@ -97,38 +96,66 @@ public class server {
                 return;
             }
 
-            if(buffer.position() < 4){
-                continue;
+            if(buffer.position()<4){
+                return ;
             }
             buffer.flip();
             int length = buffer.getInt();
-            
-            int offset = 0;
-
-            while(offset < length){
-                int bytesRead = client.read(buffer);
-
-                if(bytesRead == 0){
-                    key.interestOps(
-                        key.interestOps() | SelectionKey.OP_READ
-                    );
-                    return;
-                }
-
-                if(bytesRead == -1){
-                    key.interestOps(
-                        (key.interestOps() | SelectionKey.OP_WRITE) & ~SelectionKey.OP_READ
-                    );
-                    return;
-                }
-
-                offset+=bytesRead;
+            connection.setLength(length);
+            connection.setOffset(connection.getOffset() + 4);
+            buffer.compact();
+            if(length<4 || length>8196){
+                throw new Exception();
             }
-            penBuf.add(ByteBuffer.wrap(buffer.array(),0,buffer.capacity()));
-            key.interestOps(
-                key.interestOps()
-            );
+            connection.setState(Connection.State.READ_RESPONSECODE);
         }
+        if(connection.getState().equals(Connection.State.READ_RESPONSECODE)){
+            int lenRead = client.read(buffer);
+            if(lenRead == -1){
+                key.interestOps(
+                    (key.interestOps() | SelectionKey.OP_WRITE) & ~SelectionKey.OP_READ
+                );
+                return;
+            }
+
+            if(lenRead == 0){
+                key.interestOps(
+                    key.interestOps() | SelectionKey.OP_READ
+                );
+                return;
+            }
+
+            if(buffer.position()<4){
+                return ;
+            }
+            buffer.flip();
+            int resCode = buffer.getInt();
+            connection.setOffset(connection.getOffset() + 4);
+            buffer.compact();
+            connection.setState(yoo_chill.Connection.State.READ_BODY);
+        }
+
+        while (connection.getOffset() < connection.getLength()) {
+            int lenRead = client.read(buffer);
+            if(lenRead == -1){
+                key.interestOps(
+                    (key.interestOps() | SelectionKey.OP_WRITE) & ~SelectionKey.OP_READ
+                );
+                return ;
+            }
+            if(lenRead == 0){
+                key.interestOps(
+                    key.interestOps() | SelectionKey.OP_READ
+                );
+                return ;
+            }
+            buffer.flip();
+            ByteBuffer parseBuffer = ByteBuffer.wrap(buffer.array(), 0, lenRead);
+            connection.addBuffer(buffer);
+            buffer.clear();
+            connection.setOffset(connection.getOffset() + lenRead);
+        }
+        
     }
 
     public void writeProcess(SelectionKey key) throws IOException{
@@ -136,7 +163,6 @@ public class server {
         SocketChannel client = (SocketChannel)key.channel();
         Connection connection = (Connection) key.attachment();
         Queue<ByteBuffer> penBuffers = connection.getPendingBuffers();
-        // byte[] bytes = stream.toByteArray();
         while(!penBuffers.isEmpty()){
             ByteBuffer buffer = penBuffers.peek();
 
@@ -166,6 +192,11 @@ public class server {
                 penBuffers.poll();
             }
         }
+        client.close();
+    }
+
+    public void parser(SelectionKey key , ByteBuffer buffer){
+        
     }
 
     public static void main(String[] args) {
