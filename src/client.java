@@ -1,4 +1,4 @@
-package yoo_chill;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.lang.Thread.State;
@@ -70,7 +70,7 @@ public class client {
             connection.setOffset(connection.getOffset() + 4);
             buffer.compact();
             if(length<4 || length>8196){
-                throw new Exception();
+                throw new IllegalArgumentException();
             }
             connection.setState(Connection.State.READ_RESPONSECODE);
         }
@@ -97,7 +97,7 @@ public class client {
             int resCode = buffer.getInt();
             connection.setOffset(connection.getOffset() + 4);
             buffer.compact();
-            connection.setState(yoo_chill.Connection.State.READ_BODY);
+            connection.setState(Connection.State.READ_BODY);
         }
 
         while (connection.getOffset() < connection.getLength()) {
@@ -189,7 +189,7 @@ public class client {
             if(extraBuffer.position()>0){
                 byte[] wordByte = new byte[extraLength];
                 int index = 0;
-                while (index < wordLength && buffer.hasRemaining()) {
+                while (index < extraLength && buffer.hasRemaining()) {
                     wordByte[index] = buffer.get();
                     index++;
                 }

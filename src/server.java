@@ -1,5 +1,4 @@
-package yoo_chill;
-import java.io.ByteArrayInputStream;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -11,7 +10,6 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import yoo_chill.Connection;
 public class server {
 
     ExecutorService executor = Executors.newFixedThreadPool(5);
@@ -51,11 +49,12 @@ public class server {
                     if(key.isReadable()){
                         System.out.println("read");
                         SocketChannel client = (SocketChannel)key.channel();
-                         key.interestOps(
+                        key.interestOps(
                             key.interestOps() & ~SelectionKey.OP_READ
                         );
                         try {
-                            readProcess(key, client);
+                            readFull(key, client);
+                            parse(key);
                             selector.wakeup();
                             System.err.println("now it's write time");
                         } catch (IOException e) {
@@ -77,7 +76,7 @@ public class server {
     thread.start();
     }
 
-    public void readProcess(SelectionKey key , SocketChannel client) throws IOException{
+    public void readFull(SelectionKey key , SocketChannel client) throws IOException{
         Connection connection = (Connection)key.attachment();
         ByteBuffer buffer = connection.getByteByffer();
         if(connection.getState().equals(Connection.State.READ_LENGTH)){
@@ -105,7 +104,7 @@ public class server {
             connection.setOffset(connection.getOffset() + 4);
             buffer.compact();
             if(length<4 || length>8196){
-                throw new Exception();
+                throw new IllegalArgumentException();
             }
             connection.setState(Connection.State.READ_RESPONSECODE);
         }
@@ -132,7 +131,7 @@ public class server {
             int resCode = buffer.getInt();
             connection.setOffset(connection.getOffset() + 4);
             buffer.compact();
-            connection.setState(yoo_chill.Connection.State.READ_BODY);
+            connection.setState(Connection.State.READ_BODY);
         }
 
         while (connection.getOffset() < connection.getLength()) {
@@ -195,8 +194,44 @@ public class server {
         client.close();
     }
 
-    public void parser(SelectionKey key , ByteBuffer buffer){
-        
+    public static  String parse(SelectionKey key){
+        Connection connection = (Connection)key.attachment();
+        Queue<ByteBuffer> penBuffers = connection.getPendingBuffers();
+        StringBuilder builder = new StringBuilder();
+        ByteArrayOutputStream stream = new ByteArrayOutputStream();
+        ByteBuffer extraBuffer = ByteBuffer.allocate(8196);
+        int extraLength = 0;
+        while(!penBuffers.isEmpty()){
+            ByteBuffer buffer = penBuffers.peek();
+            if(extraBuffer.position()>0){
+                byte[] wordByte = new byte[extraLength];
+                int index = 0;
+                while (index < extraLength && buffer.hasRemaining()) {
+                    wordByte[index] = buffer.get();
+                    index++;
+                }
+                builder.append(new String(wordByte,StandardCharsets.UTF_8));
+                builder.append(" ");
+                extraBuffer.clear();
+                extraLength = 0;
+            }
+            int wordLength = buffer.getInt();
+            byte[] wordByte = new byte[wordLength];
+            int index = 0;
+            while (index < wordLength && buffer.hasRemaining()) {
+                wordByte[index] = buffer.get();
+                index++;
+            }
+            if(index < wordLength){
+                extraBuffer.put(wordByte, 0, index);
+                extraLength = wordLength - index - 1;
+            }
+            else{
+                builder.append(new String(wordByte,StandardCharsets.UTF_8));
+                builder.append(" ");
+            }
+        }
+        return builder.toString();
     }
 
     public static void main(String[] args) {
