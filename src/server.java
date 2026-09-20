@@ -6,6 +6,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.*;
 import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -13,6 +14,7 @@ import java.util.concurrent.Executors;
 public class server {
 
     ExecutorService executor = Executors.newFixedThreadPool(5);
+    private CommandExecutor commandExecutor;
     
     public void start(){
         Thread thread = new Thread(()->{
@@ -53,8 +55,7 @@ public class server {
                             key.interestOps() & ~SelectionKey.OP_READ
                         );
                         try {
-                            readFull(key, client);
-                            parse(key);
+                            processRequest(key,client);
                             selector.wakeup();
                             System.err.println("now it's write time");
                         } catch (IOException e) {
@@ -75,6 +76,7 @@ public class server {
 
     thread.start();
     }
+
 
     public void readFull(SelectionKey key , SocketChannel client) throws IOException{
         Connection connection = (Connection)key.attachment();
@@ -161,37 +163,30 @@ public class server {
         System.out.println("write");
         SocketChannel client = (SocketChannel)key.channel();
         Connection connection = (Connection) key.attachment();
-        Queue<ByteBuffer> penBuffers = connection.getPendingBuffers();
-        while(!penBuffers.isEmpty()){
-            ByteBuffer buffer = penBuffers.peek();
+        byte[] response = connection.getResponse();
+        ByteBuffer buffer = ByteBuffer.wrap(response);
+        while (buffer.hasRemaining()){
+            int offset = client.write(buffer);
 
-            String msg = new String(buffer.array(),StandardCharsets.UTF_8);
-
-            System.out.println(msg);
-            buffer.flip();
-
-            while(buffer.hasRemaining()){
-
-                int write = client.write(buffer);
-
-                if(write == 0){
-                    key.interestOps(
-                            key.interestOps() | SelectionKey.OP_WRITE
-                        );
-                    return; 
-                }
-                if(write == -1){
-                    key.interestOps(
-                        (key.interestOps() | SelectionKey.OP_READ) & ~SelectionKey.OP_WRITE
-                    );
-                    return;
-                }
+            if(offset == -1){
+                key.interestOps(
+                        (key.interestOps() | SelectionKey.OP_READ) & ~ SelectionKey.OP_WRITE
+                );
+                return;
             }
-            if(!buffer.hasRemaining()){
-                penBuffers.poll();
+            if(offset == 0){
+                key.interestOps(
+                        key.interestOps() | SelectionKey.OP_WRITE
+                );
+                return;
             }
         }
-        client.close();
+        if(!buffer.hasRemaining()){
+            key.interestOps(
+                    (key.interestOps() | SelectionKey.OP_READ) & ~ SelectionKey.OP_WRITE
+            );
+            return;
+        }
     }
 
     public static  String parse(SelectionKey key){
@@ -232,6 +227,16 @@ public class server {
             }
         }
         return builder.toString();
+    }
+
+    public void processRequest(SelectionKey key, SocketChannel client) throws IOException {
+        readFull(key, client);
+        String request = parse(key);
+        List<String> cmds = List.of(request.split("\\s+"));
+        Object object = commandExecutor.execute(cmds);
+        Serializer serializer = new Serializer();
+        byte[] bytes = serializer.encode(object);
+        writeProcess(key,bytes);
     }
 
     public static void main(String[] args) {

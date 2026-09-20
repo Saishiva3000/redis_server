@@ -8,6 +8,9 @@ public class Table<K,V>{
 
     @SuppressWarnings("unchecked")
     public Table(int size) {
+        if(size<=0 || (size & (size -1)) !=0){
+            throw new IllegalArgumentException("size is not power of two");
+        }
         this.size = size;
         this.table = (Bucket<K, V>[]) Array.newInstance(Bucket.class,size);
         this.mash = size-1;

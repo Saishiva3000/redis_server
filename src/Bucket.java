@@ -49,12 +49,13 @@ public class Bucket<K,V> {
                 temp.setNext(temp.getNext().getNext());
                 return returnValue;
             }
+            temp = temp.getNext();
         }
         return temp;
     }
 
 
-    public K getKey(){
-        return head.getKey();
+    public KeyValueStore<K, V> getHead() {
+        return head;
     }
 }

@@ -4,50 +4,55 @@ public class IncrementalHashMap <K,V>{
 
     private Table<K,V> newTable = null;
     private Table<K,V> oldTable = new Table<>(8);
-    private static final float THRESHOLD = 0.75f;
-    private static boolean REHASHING_TRIGGERED = false;
-    private static int noOfEntries = 0;
-    private static int migratePosition = 0;
-    private static int REHASHING_WORK = 128;
+    private static final int MAX_LOAD_FACTOR = 8;
+    private boolean REHASHING_TRIGGERED = false;
+    private int noOfEntries = 0;
+    private int migratePosition = 0;
+    private int REHASHING_WORK = 128;
 
-    public void put(K key,V value){
-        int triggerFactor = (int) (THRESHOLD*oldTable.getSize());
+    public Integer put(K key,V value){
+        int triggerFactor = (int) (MAX_LOAD_FACTOR*oldTable.getSize());
         if(noOfEntries > triggerFactor){
             triggerRehashing();
         }
         if(REHASHING_TRIGGERED){
-            int index = key.hashCode()% newTable.getSize();
+            int index = (key.hashCode() & newTable.getMash());
             Bucket<K,V> bucket = newTable.getBucket(index);
             if(bucket == null){
                 bucket = new Bucket<>(key,value);
                 newTable.setBucket(index,bucket);
-                return;
+                helpRehashing();
+                noOfEntries++;
+                return 1;
             }
             bucket.addEntry(key,value);
             helpRehashing();
         }
         else {
-            int index = key.hashCode()% oldTable.getSize();
+            int index = key.hashCode() & oldTable.getMash();
             Bucket<K,V> bucket = oldTable.getBucket(index);
             if(bucket == null){
                 bucket = new Bucket<>(key,value);
                 oldTable.setBucket(index,bucket);
-                return;
+                noOfEntries++;
+                return 1;
             }
             bucket.addEntry(key,value);
         }
         noOfEntries++;
+        return 1;
     }
 
     public V get(K key){
+        KeyValueStore<K,V> keyValueStore = null;
         if(REHASHING_TRIGGERED){
-            int index = key.hashCode()% newTable.getSize();
+            int index = key.hashCode() & newTable.getMash();
             Bucket<K,V> newTableBucket = newTable.getBucket(index);
-            if(newTableBucket == null){
-                return null;
+            if(newTableBucket != null){
+                keyValueStore = newTableBucket.getEntry(key);
             }
-            KeyValueStore<K,V> keyValueStore = newTableBucket.getEntry(key);
             if(keyValueStore == null){
+                index = key.hashCode() & oldTable.getMash();
                 Bucket<K,V> oldTableBucket = oldTable.getBucket(index);
                 if(oldTableBucket == null){
                     return null;
@@ -58,42 +63,43 @@ public class IncrementalHashMap <K,V>{
             helpRehashing();
         }
         else{
-            int index = key.hashCode()% oldTable.getSize();
+            int index = key.hashCode() & oldTable.getMash();
             Bucket<K,V> bucket = oldTable.getBucket(index);
             if(bucket == null){
                 return null;
             }
-            KeyValueStore<K,V> keyValueStore = bucket.getEntry(key);
-            return keyValueStore.getValue();
+            keyValueStore = bucket.getEntry(key);
         }
-        return null;
+        return keyValueStore == null ? null : keyValueStore.getValue();
     }
 
-    public void remove(K key){
+    public Integer remove(K key){
         if(REHASHING_TRIGGERED){
-            int index = key.hashCode()% newTable.getSize();
+            int index = key.hashCode() & newTable.getMash();
             Bucket<K,V> newTableBucket = newTable.getBucket(index);
             if(newTableBucket == null){
-                return;
+                return 0;
             }
             KeyValueStore<K,V> keyValueStore = newTableBucket.delEntry(key);
             if(keyValueStore == null){
+                index = key.hashCode() & oldTable.getMash();
                 Bucket<K,V> oldTableBucket = oldTable.getBucket(index);
                 if(oldTableBucket == null){
-                    return;
+                    return 0;
                 }
                 oldTableBucket.delEntry(key);
             }
             helpRehashing();
         }
         else {
-            int index = key.hashCode()% newTable.getSize();
+            int index = key.hashCode() & oldTable.getMash();
             Bucket<K,V> oldTableBucket = oldTable.getBucket(index);
             if(oldTableBucket == null){
-                return;
+                return 0;
             }
             oldTableBucket.delEntry(key);
         }
+        return 1;
     }
 
     public void triggerRehashing(){
@@ -113,13 +119,23 @@ public class IncrementalHashMap <K,V>{
             newTable = new Table<>(oldTable.getSize() * 2);
         }
         for (int i =0; i<REHASHING_WORK ;i++){
-            Bucket<K,V> head = oldTable.getBucket(migratePosition);
-            if(head != null){
-                K key = head.getKey();
-                int index = key.hashCode() % newTable.getSize();
-                newTable.setBucket(index,head);
-                migratePosition++;
+            Bucket<K,V> bucket = oldTable.getBucket(migratePosition);
+            if(bucket != null){
+                KeyValueStore<K,V> head = bucket.getHead();
+                while(head != null){
+                    int index = head.getKey().hashCode() & newTable.getMash();
+                    Bucket<K,V> newBucket = newTable.getBucket(index);
+                    if(newBucket == null){
+                        newBucket = new Bucket<>(head.getKey(),head.getValue());
+                        newTable.setBucket(index,bucket);
+                        head = head.getNext();
+                        continue;
+                    }
+                    newBucket.addEntry(head.getKey(), head.getValue());
+                    head = head.getNext();
+                }
             }
+            migratePosition++;
             if(migratePosition >= oldTable.getSize()){
                 REHASHING_TRIGGERED = false;
                 oldTable = newTable;

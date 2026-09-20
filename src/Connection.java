@@ -12,7 +12,7 @@ public class Connection {
     private ByteBuffer readBuffer = ByteBuffer.allocate(8196);
     private Queue<ByteBuffer> pendingBuffers = new ConcurrentLinkedQueue<>();
     private State state = State.READ_LENGTH;
-    private String response;
+    private byte[] response;
     private int length = 0;
     private int offset = 0;
 
@@ -70,12 +70,11 @@ public class Connection {
         READ_BODY
     }
 
-    public String getResponse(){
+    public byte[] getResponse() {
         return response;
     }
 
-    public void  setResponse(String res){
-        this.response = res;
+    public void setResponse(byte[] response) {
+        this.response = response;
     }
-
-}   
+}
